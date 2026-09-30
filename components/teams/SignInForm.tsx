@@ -20,7 +20,12 @@ export function SignInForm() {
       email: email.trim().toLowerCase(),
       options: { shouldCreateUser: true, emailRedirectTo: redirect.toString() },
     });
-    if (authError) setError(authError.message); else setSent(true);
+    if (authError) {
+      const message = authError.message.toLowerCase();
+      setError(message.includes("rate limit")
+        ? "Supabase has temporarily limited sign-in emails for this project. Wait up to an hour before trying again, or ask the project owner to configure a custom SMTP provider."
+        : authError.message);
+    } else setSent(true);
     setBusy(false);
   }
   return <form onSubmit={submit}>
