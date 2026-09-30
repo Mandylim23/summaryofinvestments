@@ -51,7 +51,9 @@
 - All tables: permissive read/write (demo-first).
 - Lock-down sprint: `auth.uid() = user_id` on all.
 
-## AI fields (later)
-Bank statement parsing will add `transaction_drafts` with:
-- `parsed_data jsonb`, `source text`, `confidence numeric`, `review_status text default 'unreviewed'`
-Not in v1 schema.
+## Statement imports
+- `statement_imports` stores team-scoped statement metadata, SHA-256 deduplication hash, currency, date range, credit/debit totals, and importing user. The original CSV is not persisted.
+- `statement_entries` stores parsed transaction rows, category, optional security/quantity/price/fees for trade review, and a link to the resulting portfolio transaction.
+- `transactions.statement_entry_id` prevents the same statement row from being recorded twice.
+
+Statement CSV parsing is deterministic and client-side; users review and map columns before saving. AI confidence and extraction fields remain a later enhancement.

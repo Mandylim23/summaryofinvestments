@@ -19,10 +19,11 @@ Finance staff (daily data entry, reconciliation) and managers (review gains/loss
 - [ ] Investment P&L summary: total realized + unrealized gains/losses.
 - [ ] Simple balance-sheet view: cost of investments vs current market value.
 - [ ] Filter by account and date range.
+- [ ] Import a bank statement CSV, summarize credits/debits and categories, review rows, and record confirmed investment trades.
 - [ ] Demo data visible without login.
 
 ## Non-goals (v1)
-- No bank statement PDF parsing.
+- No bank statement PDF parsing (CSV export only).
 - No multi-currency conversion.
 - No user auth / per-user isolation (later sprint).
 - No dividend / interest / corporate-action transaction types.

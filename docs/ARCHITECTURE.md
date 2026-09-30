@@ -4,8 +4,8 @@
 Next.js (App Router) + Supabase (Postgres) + Vercel. Tailwind for UI. No external services in v1.
 
 ## Build now vs later
-**Now:** transaction CRUD, position derivation (server-side from transactions), P&L + balance sheet views, date/account filters, demo seed.
-**Later:** auth + per-user RLS, bank statement upload + AI extraction, dividend/interest types, multi-currency, export.
+**Now:** transaction CRUD, position derivation (server-side from transactions), P&L + balance sheet views, date/account filters, demo seed, and team-scoped bank statement CSV import with saved cash summaries, category review, and optional trade recording.
+**Later:** bank statement PDF/AI extraction, dividend/interest types, multi-currency conversion, export to accounting systems.
 
 ## Key user flow (one action)
 1. Finance staff opens **Transactions** page → clicks **Add Transaction**.
@@ -56,3 +56,4 @@ __tests__/      # beside code
 | `dashboard` | Combined overview cards | reads from all | 4 |
 | `auth` (later) | Per-user isolation | RLS policies | 5 |
 | `ai/parser` (later) | Bank statement → transaction drafts | `transaction_drafts` | 6 |
+| `statements` | CSV import, summary, row categorization, reviewed trade creation | `statement_imports`, `statement_entries` | 7 |

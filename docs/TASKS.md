@@ -41,7 +41,7 @@
 **DoD:** User A cannot see User B's transactions.
 
 ## Later
-- Bank statement upload + AI extraction → transaction drafts.
+- Bank statement PDF upload + AI extraction → transaction drafts.
 - Draft review workflow + audit logs.
 - Dividend/interest transaction types.
 - Multi-currency.
