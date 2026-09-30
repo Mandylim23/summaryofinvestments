@@ -23,6 +23,15 @@ export default function Home() {
   const [modal,setModal] = useState(false), [editing,setEditing] = useState<Transaction | null>(null), [saving,setSaving] = useState(false);
   const supabase = useMemo(() => typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? createClient() : null, []);
 
+  // Supabase sends expired or already-used email links to its configured Site URL.
+  // Route those errors back to the sign-in form so the user can request a fresh link.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("error_code") || params.get("error") === "access_denied") {
+      window.location.replace("/auth/sign-in?error=confirmation");
+    }
+  }, []);
+
   const refresh = useCallback(async (requestedTeamId?: string) => {
     setLoading(true); setError("");
     if (!supabase) { setError("Supabase is not configured. Pull this project's Vercel environment into .env.local, then reload."); setLoading(false); return; }

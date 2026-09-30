@@ -24,7 +24,7 @@ export function SignInForm() {
     setBusy(false);
   }
   return <form onSubmit={submit}>
-    {params.get("error") === "confirmation" && <p role="alert">That sign-in link is invalid or expired. Request a new one.</p>}
+    {params.get("error") === "confirmation" && <p role="alert">That sign-in link has expired or has already been used. Enter your email below to request a fresh link.</p>}
     <label style={{display:"grid",gap:8}}>Work email<input type="email" required autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} /></label>
     <button type="submit" disabled={busy || sent} style={{marginTop:16}}>{busy ? "Sending…" : sent ? "Link sent" : "Email me a sign-in link"}</button>
     {sent && <p role="status">Check your inbox for a secure sign-in link.</p>}
