@@ -50,12 +50,12 @@ export default function Home() {
     if(newAccount){ const {data,error:e}=await supabase.from("accounts").insert({name:newAccount,institution:String(form.get("institution")||"").trim()||null}).select("id").single(); if(e||!data){setError(e?.message??"Could not create account.");setSaving(false);return} finalAccount=data.id; }
     if(newSecurity){ const {data,error:e}=await supabase.from("securities").insert({name:newSecurity,ticker:String(form.get("ticker")||"").trim()||null,asset_type:String(form.get("asset_type")||"").trim()||null}).select("id").single();if(e||!data){setError(e?.message??"Could not create security.");setSaving(false);return}finalSecurity=data.id; }
     if(!finalAccount||!finalSecurity){setError("Select or add both an account and a security.");setSaving(false);return}
-    if(type==="sale"){
-      const existing=transactions.filter(t=>t.account_id===finalAccount&&t.security_id===finalSecurity&&t.id!==editing?.id&&t.txn_date<=date).sort((a,b)=>a.txn_date.localeCompare(b.txn_date));
-      let units=0;for(const t of existing) units+=t.txn_type==="buy"?t.quantity:-t.quantity;
-      if(qty>units+1e-8){setError(`This sale is for ${number(qty)} units, but only ${number(Math.max(0,units))} are held in this account on that date.`);setSaving(false);return}
-    }
     const payload={account_id:finalAccount,security_id:finalSecurity,txn_date:date,txn_type:type,quantity:qty,unit_price:price,fees,notes:String(form.get("notes")||"").trim()||null};
+    const candidate:Transaction={id:editing?.id??"new",...payload,created_at:editing?.created_at??new Date().toISOString()};
+    const history=[...transactions.filter(t=>t.account_id===finalAccount&&t.security_id===finalSecurity&&t.id!==editing?.id),candidate]
+      .sort((a,b)=>a.txn_date.localeCompare(b.txn_date)||(a.created_at??"").localeCompare(b.created_at??"")||a.id.localeCompare(b.id));
+    let held=0;
+    for(const row of history){held+=row.txn_type==="buy"?row.quantity:-row.quantity;if(held < -1e-8){setError(`This change would sell more units than are held as of ${row.txn_date}. Check the transaction dates and quantities.`);setSaving(false);return}}
     const result=editing?await supabase.from("transactions").update(payload).eq("id",editing.id):await supabase.from("transactions").insert(payload);
     if(result.error){setError(result.error.message);setSaving(false);return}
     setModal(false);setEditing(null);setNotice(editing?"Transaction updated":"Transaction added");setSaving(false);await refresh();
