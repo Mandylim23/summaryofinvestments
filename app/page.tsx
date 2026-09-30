@@ -1,30 +1,59 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Account, calculatePositions, Position, Security, Transaction } from "@/lib/investment";
+import { TeamSwitcher } from "@/components/teams/TeamSwitcher";
+import { InviteMemberForm } from "@/components/teams/InviteMemberForm";
 
 type Page = "Overview" | "Transactions" | "Positions" | "P&L Summary" | "Balance Sheet";
 const nav: { name: Page; icon: string }[] = [{name:"Overview",icon:"◫"},{name:"Transactions",icon:"⇄"},{name:"Positions",icon:"▤"},{name:"P&L Summary",icon:"⌁"},{name:"Balance Sheet",icon:"▥"}];
 const money = (n: number | null | undefined) => n == null ? "—" : new Intl.NumberFormat("en-US", {style:"currency",currency:"USD",maximumFractionDigits:2}).format(n);
 const number = (n: number) => new Intl.NumberFormat("en-US", {maximumFractionDigits:4}).format(n);
 const today = new Date().toISOString().slice(0,10);
+const DEMO_TEAM_ID = "d0000000-0000-0000-0000-000000000001";
 
 export default function Home() {
   const [page, setPage] = useState<Page>("Overview"), [mobileOpen, setMobileOpen] = useState(false);
   const [accounts,setAccounts] = useState<Account[]>([]), [securities,setSecurities] = useState<Security[]>([]), [transactions,setTransactions] = useState<Transaction[]>([]);
+  const [activeTeamId,setActiveTeamId] = useState(DEMO_TEAM_ID), [teamName,setTeamName] = useState("SP Holdings"), [teamRole,setTeamRole] = useState<string | null>(null), [userEmail,setUserEmail] = useState<string | null>(null);
+  const activeTeamRef = useRef(DEMO_TEAM_ID), initializedTeamRef = useRef(false), teamPreferenceRef = useRef(false);
   const [loading,setLoading] = useState(true), [error,setError] = useState(""), [notice,setNotice] = useState("");
   const [accountFilter,setAccountFilter] = useState("all"), [from,setFrom] = useState(""), [to,setTo] = useState("");
   const [modal,setModal] = useState(false), [editing,setEditing] = useState<Transaction | null>(null), [saving,setSaving] = useState(false);
   const supabase = useMemo(() => typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? createClient() : null, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (requestedTeamId?: string) => {
     setLoading(true); setError("");
     if (!supabase) { setError("Supabase is not configured. Pull this project's Vercel environment into .env.local, then reload."); setLoading(false); return; }
+    const {data:{user}} = await supabase.auth.getUser();
+    setUserEmail(user?.email ?? null);
+    let memberships: {team_id:string;role:string;team:{id:string;name:string;slug:string;is_demo:boolean;created_at:string}|null}[] = [];
+    if (user) {
+      const {data,error:membershipError} = await supabase.from("team_members").select("team_id,role,team:teams(id,name,slug,is_demo,created_at)").order("joined_at",{ascending:true});
+      if (membershipError) { setError(membershipError.message); setLoading(false); return; }
+      memberships = (data ?? []) as unknown as typeof memberships;
+    }
+    const queryTeam = typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("team");
+    const currentTeam = requestedTeamId ?? activeTeamRef.current;
+    let resolvedTeamId = currentTeam;
+    if (!initializedTeamRef.current) {
+      resolvedTeamId = memberships.some(m=>m.team_id===queryTeam) ? queryTeam! : memberships[0]?.team_id ?? DEMO_TEAM_ID;
+      initializedTeamRef.current = true;
+    } else if (resolvedTeamId===DEMO_TEAM_ID && memberships.length>0 && !teamPreferenceRef.current) {
+      resolvedTeamId = memberships[0].team_id;
+    } else if (resolvedTeamId !== DEMO_TEAM_ID && !memberships.some(m=>m.team_id===resolvedTeamId)) {
+      resolvedTeamId = memberships[0]?.team_id ?? DEMO_TEAM_ID;
+    }
+    activeTeamRef.current = resolvedTeamId;
+    setActiveTeamId(resolvedTeamId);
+    const selectedTeam = memberships.find(m=>m.team_id===resolvedTeamId);
+    setTeamName(selectedTeam?.team?.name ?? "SP Holdings");
+    setTeamRole(selectedTeam?.role ?? null);
     const [a,s,t] = await Promise.all([
-      supabase.from("accounts").select("id,name,institution").order("name"),
-      supabase.from("securities").select("id,name,ticker,asset_type,current_price,price_as_of").order("name"),
-      supabase.from("transactions").select("id,account_id,security_id,txn_date,txn_type,quantity,unit_price,fees,notes,created_at").order("txn_date",{ascending:false}),
+      supabase.from("accounts").select("id,name,institution").eq("team_id",resolvedTeamId).order("name"),
+      supabase.from("securities").select("id,name,ticker,asset_type,current_price,price_as_of").eq("team_id",resolvedTeamId).order("name"),
+      supabase.from("transactions").select("id,account_id,security_id,txn_date,txn_type,quantity,unit_price,fees,notes,created_at").eq("team_id",resolvedTeamId).order("txn_date",{ascending:false}),
     ]);
     const failure = a.error || s.error || t.error;
     if (failure) setError(`${failure.message}. Check that the Supabase migration is applied and .env.local has valid project keys.`);
@@ -32,6 +61,7 @@ export default function Home() {
     setLoading(false);
   },[supabase]);
   useEffect(()=>{void refresh()},[refresh]);
+  useEffect(()=>{if(!supabase)return;const {data:{subscription}}=supabase.auth.onAuthStateChange((event)=>{if(event==="SIGNED_IN"||event==="SIGNED_OUT")void refresh()});return()=>subscription.unsubscribe()},[supabase,refresh]);
   useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>setNotice(""),3500);return()=>clearTimeout(timer)},[notice]);
 
   const filteredTransactions = useMemo(()=>transactions.filter(t=>(accountFilter==="all"||t.account_id===accountFilter)&&(!from||t.txn_date>=from)&&(!to||t.txn_date<=to)),[transactions,accountFilter,from,to]);
@@ -42,15 +72,16 @@ export default function Home() {
   async function saveTransaction(form: FormData) {
     setSaving(true); setError("");
     if (!supabase) { setError("Supabase is not configured. Pull this project's Vercel environment into .env.local, then reload."); setSaving(false); return; }
+    if (!requireTeamWrite()) { setSaving(false); return; }
     const type=form.get("txn_type") as "buy"|"sale", date=String(form.get("txn_date")), qty=Number(form.get("quantity")), price=Number(form.get("unit_price")), fees=Number(form.get("fees")||0);
     const accountId=String(form.get("account_id")), securityId=String(form.get("security_id"));
     const newAccount=String(form.get("new_account")||"").trim(), newSecurity=String(form.get("new_security")||"").trim();
     if(!date||!Number.isFinite(qty)||qty<=0||!Number.isFinite(price)||price<0||fees<0){setError("Enter a date, a quantity greater than zero, a valid price, and non-negative fees.");setSaving(false);return}
     let finalAccount=accountId, finalSecurity=securityId;
-    if(newAccount){ const {data,error:e}=await supabase.from("accounts").insert({name:newAccount,institution:String(form.get("institution")||"").trim()||null}).select("id").single(); if(e||!data){setError(e?.message??"Could not create account.");setSaving(false);return} finalAccount=data.id; }
-    if(newSecurity){ const {data,error:e}=await supabase.from("securities").insert({name:newSecurity,ticker:String(form.get("ticker")||"").trim()||null,asset_type:String(form.get("asset_type")||"").trim()||null}).select("id").single();if(e||!data){setError(e?.message??"Could not create security.");setSaving(false);return}finalSecurity=data.id; }
+    if(newAccount){ const {data,error:e}=await supabase.from("accounts").insert({team_id:activeTeamId,name:newAccount,institution:String(form.get("institution")||"").trim()||null}).select("id").single(); if(e||!data){setError(e?.message??"Could not create account.");setSaving(false);return} finalAccount=data.id; }
+    if(newSecurity){ const {data,error:e}=await supabase.from("securities").insert({team_id:activeTeamId,name:newSecurity,ticker:String(form.get("ticker")||"").trim()||null,asset_type:String(form.get("asset_type")||"").trim()||null}).select("id").single();if(e||!data){setError(e?.message??"Could not create security.");setSaving(false);return}finalSecurity=data.id; }
     if(!finalAccount||!finalSecurity){setError("Select or add both an account and a security.");setSaving(false);return}
-    const payload={account_id:finalAccount,security_id:finalSecurity,txn_date:date,txn_type:type,quantity:qty,unit_price:price,fees,notes:String(form.get("notes")||"").trim()||null};
+    const payload={team_id:activeTeamId,account_id:finalAccount,security_id:finalSecurity,txn_date:date,txn_type:type,quantity:qty,unit_price:price,fees,notes:String(form.get("notes")||"").trim()||null};
     const candidate:Transaction={id:editing?.id??"new",...payload,created_at:editing?.created_at??new Date().toISOString()};
     const history=[...transactions.filter(t=>t.account_id===finalAccount&&t.security_id===finalSecurity&&t.id!==editing?.id),candidate]
       .sort((a,b)=>a.txn_date.localeCompare(b.txn_date)||(a.created_at??"").localeCompare(b.created_at??"")||a.id.localeCompare(b.id));
@@ -60,30 +91,36 @@ export default function Home() {
     if(result.error){setError(result.error.message);setSaving(false);return}
     setModal(false);setEditing(null);setNotice(editing?"Transaction updated":"Transaction added");setSaving(false);await refresh();
   }
-  async function deleteTransaction(t:Transaction){if(!window.confirm("Delete this transaction? This cannot be undone."))return;if(!supabase){setError("Supabase is not configured.");return}const {error:e}=await supabase.from("transactions").delete().eq("id",t.id);if(e)setError(e.message);else{setNotice("Transaction deleted");await refresh()}}
-  async function updatePrice(id:string,value:string){if(!supabase){setError("Supabase is not configured.");return}const price=value===""?null:Number(value);if(price!==null&&(!Number.isFinite(price)||price<0)){setError("Price must be zero or greater.");return}const {error:e}=await supabase.from("securities").update({current_price:price,price_as_of:price===null?null:today}).eq("id",id);if(e)setError(e.message);else{setNotice("Market price updated");await refresh()}}
+  async function deleteTransaction(t:Transaction){if(!window.confirm("Delete this transaction? This cannot be undone."))return;if(!supabase){setError("Supabase is not configured.");return}if(!requireTeamWrite())return;const {error:e}=await supabase.from("transactions").delete().eq("id",t.id).eq("team_id",activeTeamId);if(e)setError(e.message);else{setNotice("Transaction deleted");await refresh()}}
+  async function updatePrice(id:string,value:string){if(!supabase){setError("Supabase is not configured.");return}if(!requireTeamWrite())return;const price=value===""?null:Number(value);if(price!==null&&(!Number.isFinite(price)||price<0)){setError("Price must be zero or greater.");return}const {error:e}=await supabase.from("securities").update({current_price:price,price_as_of:price===null?null:today}).eq("id",id).eq("team_id",activeTeamId);if(e)setError(e.message);else{setNotice("Market price updated");await refresh()}}
   function exportCsv(){const rows=[["Date","Type","Account","Security","Quantity","Unit price","Fees","Notes"],...filteredTransactions.map(t=>[t.txn_date,t.txn_type,accounts.find(a=>a.id===t.account_id)?.name,securities.find(s=>s.id===t.security_id)?.name,t.quantity,t.unit_price,t.fees,t.notes??""])];const csv=rows.map(r=>r.map(c=>`"${String(c??"").replaceAll('"','""')}"`).join(",")).join("\r\n");const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));link.download="investment-transactions.csv";link.click();URL.revokeObjectURL(link.href)}
-  function openEdit(t:Transaction){setEditing(t);setModal(true)}
+  function requireTeamWrite(){if(!userEmail){window.location.assign("/auth/sign-in");return false}if(activeTeamId===DEMO_TEAM_ID){window.location.assign("/teams/new");return false}if(teamRole==="viewer"){setError("Your team role is view-only. Ask a team admin to change your role.");return false}return true}
+  function switchTeam(id:string){teamPreferenceRef.current=true;window.history.replaceState(null,"",id===DEMO_TEAM_ID?"/":`/?team=${encodeURIComponent(id)}`);void refresh(id)}
+  function startTransaction(){if(!requireTeamWrite())return;setEditing(null);setModal(true)}
+  function openEdit(t:Transaction){if(!requireTeamWrite())return;setEditing(t);setModal(true)}
+  async function signOut(){if(!supabase)return;await supabase.auth.signOut();activeTeamRef.current=DEMO_TEAM_ID;initializedTeamRef.current=true;teamPreferenceRef.current=true;await refresh(DEMO_TEAM_ID)}
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${activeTeamId===DEMO_TEAM_ID?"demo-mode":""}`}>
     <aside className={`sidebar ${mobileOpen?"sidebar-open":""}`}>
       <div className="brand"><div className="brand-mark">N</div><div><b>Northstar</b><small>INVESTMENTS</small></div><button className="mobile-close" onClick={()=>setMobileOpen(false)}>×</button></div>
-      <div className="workspace-label">WORKSPACE</div><div className="workspace"><span className="workspace-icon">S</span><span><b>SP Holdings</b><small>Finance team</small></span><span className="chevron">⌄</span></div>
+      <div className="workspace-label">WORKSPACE</div><div className="workspace"><span className="workspace-icon">{teamName.slice(0,1).toUpperCase()}</span><span><b>{teamName}</b><small>{teamRole??"Demo workspace"}</small></span><span className="chevron">⌄</span></div>
       <div className="nav-label">PORTFOLIO</div><nav>{nav.map(item=><button key={item.name} className={`nav-item ${page===item.name?"active":""}`} onClick={()=>{setPage(item.name);setMobileOpen(false)}}><span className="nav-icon">{item.icon}</span>{item.name}{item.name==="Transactions"&&<span className="nav-count">{transactions.length}</span>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="help-card"><span className="help-icon">?</span><b>Need a hand?</b><p>Your investment activity, all in one place.</p></div><div className="profile"><div className="avatar">FL</div><span><b>Finance Lead</b><small>SP Holdings</small></span><span className="chevron">···</span></div></div>
     </aside>
     {mobileOpen&&<button aria-label="Close navigation" className="scrim" onClick={()=>setMobileOpen(false)}/>}
-    <main className="main-area"><header className="topbar"><button className="menu-button" onClick={()=>setMobileOpen(true)}>☰</button><div className="crumb">Portfolio <span>/</span> <b>{page}</b></div><div className="top-actions"><span className="live-dot"/> Demo workspace <div className="top-avatar">FL</div></div></header>
+    <main className="main-area"><header className="topbar"><button className="menu-button" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}>☰</button><div className="crumb">Portfolio <span>/</span> <b>{page}</b></div><div className="top-actions"><span className="live-dot"/><TeamSwitcher value={activeTeamId} onChange={switchTeam}/>{userEmail?<><a href="/teams/new" className="team-link">＋ Team</a><button className="team-link" onClick={()=>void signOut()}>Sign out</button></>:<a href="/auth/sign-in" className="team-link">Sign in</a>}<div className="top-avatar">{userEmail?.slice(0,1).toUpperCase()??"D"}</div></div></header>
       <div className="content">
-        <div className="page-heading"><div><div className="eyebrow">YOUR PORTFOLIO <span>•</span> {today}</div><h1>{page=== "Overview"?"Good morning, Finance team":""}{page!=="Overview"&&page}</h1><p>{page==="Overview"?"Here’s how your investments are performing.":page==="Transactions"?"Review and manage every buy and sale in your portfolio.":page==="Positions"?"Your current holdings, cost basis, and market performance.":page==="P&L Summary"?"A clear view of realized and unrealized performance.":"Investment assets by account, at cost and current market value."}</p></div><div className="heading-actions"><button className="button button-light" onClick={exportCsv}>⇩ <span>Export</span></button><button className="button button-primary" onClick={()=>{setEditing(null);setModal(true)}}><span>＋</span> Add transaction</button></div></div>
+        {activeTeamId===DEMO_TEAM_ID&&<div className="demo-banner"><span>Demo workspace · view only</span><a href={userEmail?"/teams/new":"/auth/sign-in"}>{userEmail?"Create a team to start recording transactions":"Sign in to create your team"} →</a></div>}
+        {userEmail&&activeTeamId!==DEMO_TEAM_ID&&(teamRole==="owner"||teamRole==="admin")&&<div className="team-invite-bar"><span>Invite a teammate</span><InviteMemberForm teamId={activeTeamId}/></div>}
+        <div className="page-heading"><div><div className="eyebrow">YOUR PORTFOLIO <span>•</span> {today}</div><h1>{page=== "Overview"?"Good morning, Finance team":""}{page!=="Overview"&&page}</h1><p>{page==="Overview"?"Here’s how your investments are performing.":page==="Transactions"?"Review and manage every buy and sale in your portfolio.":page==="Positions"?"Your current holdings, cost basis, and market performance.":page==="P&L Summary"?"A clear view of realized and unrealized performance.":"Investment assets by account, at cost and current market value."}</p></div><div className="heading-actions"><button className="button button-light" onClick={exportCsv}>⇩ <span>Export</span></button><button className="button button-primary" onClick={startTransaction}><span>＋</span> Add transaction</button></div></div>
         {error&&<div className="alert-error"><span>!</span><div>{error}</div><button onClick={()=>setError("")}>×</button></div>}{notice&&<div className="toast">✓ &nbsp;{notice}</div>}
         {page!=="Overview"&&<div className="filter-bar"><div className="filter-label">FILTER BY</div><label className="filter-select"><span>Account</span><select value={accountFilter} onChange={e=>setAccountFilter(e.target.value)}><option value="all">All accounts</option>{accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="filter-date"><span>From</span><input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label className="filter-date"><span>To</span><input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label>{(accountFilter!=="all"||from||to)&&<button className="clear-filter" onClick={()=>{setAccountFilter("all");setFrom("");setTo("")}}>Clear filters</button>}</div>}
         {(page==="Overview"||page==="P&L Summary")&&<section className="metric-grid"><Metric label="Total cost basis" value={money(totals.cost)} icon="◈" foot="Across active positions"/><Metric label="Market value" value={money(totals.market)} icon="↗" foot="Based on latest prices"/><Metric label="Realized P&L" value={money(totals.realized)} icon="⌁" trend={totals.realized} foot="From completed sales"/><Metric label="Unrealized P&L" value={money(totals.unrealized)} icon="◌" trend={totals.unrealized} foot="On current holdings"/></section>}
         {loading?<div className="loading-card"><div className="spinner"/>Loading your portfolio…</div>:<>
-          {page==="Overview"&&<><section className="overview-grid"><div className="panel allocation-panel"><div className="panel-heading"><div><h2>Portfolio overview</h2><p>Cost basis and current market value</p></div><button className="text-link" onClick={()=>setPage("Positions")}>View positions <span>→</span></button></div><div className="chart-area"><div className="donut" style={{background:`conic-gradient(#4b53c3 0 44%,#7996d6 44% 72%,#9ac4bb 72% 89%,#efc688 89% 100%)`}}><div className="donut-hole"><b>{filteredPositions.length}</b><span>holdings</span></div></div><div className="legend">{filteredPositions.slice(0,4).map((p,i)=><div className="legend-row" key={p.security.id+p.account.id}><i className={`legend-dot color-${i%4}`}/><span>{p.security.name}<small>{p.account.name}</small></span><b>{money(p.market)}</b></div>)}{filteredPositions.length===0&&<Empty text="Your holdings will appear here."/>}</div></div><div className="value-compare"><div><span>Total invested</span><b>{money(totals.cost)}</b></div><div><span>Current value</span><b>{money(totals.market)}</b></div><div className="compare-line"><i style={{width:`${totals.cost?Math.min(100,totals.market/totals.cost*50):0}%`}}/></div></div></div>
+          {page==="Overview"&&<><section className="overview-grid"><div className="panel allocation-panel"><div className="panel-heading"><div><h2>Portfolio overview</h2><p>Cost basis and current market value</p></div><button className="text-link" onClick={()=>setPage("Positions")}>View positions <span>→</span></button></div><div className="chart-area"><div className="donut" style={{background:`conic-gradient(#0a2540 0 44%,#00677e 44% 72%,#2dd4bf 72% 89%,#d9b982 89% 100%)`}}><div className="donut-hole"><b>{filteredPositions.length}</b><span>holdings</span></div></div><div className="legend">{filteredPositions.slice(0,4).map((p,i)=><div className="legend-row" key={p.security.id+p.account.id}><i className={`legend-dot color-${i%4}`}/><span>{p.security.name}<small>{p.account.name}</small></span><b>{money(p.market)}</b></div>)}{filteredPositions.length===0&&<Empty text="Your holdings will appear here."/>}</div></div><div className="value-compare"><div><span>Total invested</span><b>{money(totals.cost)}</b></div><div><span>Current value</span><b>{money(totals.market)}</b></div><div className="compare-line"><i style={{width:`${totals.cost?Math.min(100,totals.market/totals.cost*50):0}%`}}/></div></div></div>
             <div className="panel activity-panel"><div className="panel-heading"><div><h2>Recent transactions</h2><p>Your latest portfolio activity</p></div><button className="text-link" onClick={()=>setPage("Transactions")}>See all <span>→</span></button></div><TransactionsTable rows={filteredTransactions.slice(0,5)} accounts={accounts} securities={securities} onEdit={openEdit} onDelete={deleteTransaction} compact/></div></section><div className="insight-strip"><div className="insight-symbol">✦</div><div><b>Portfolio at a glance</b><p>{filteredPositions.length} active {filteredPositions.length===1?"position":"positions"} across {accounts.length} accounts. {totals.unrealized>=0?"Your holdings are above cost basis.":"Your holdings are below cost basis."}</p></div><button className="text-link" onClick={()=>setPage("P&L Summary")}>View performance →</button></div></>}
-          {page==="Transactions"&&<section className="panel table-panel"><div className="panel-heading"><div><h2>All transactions <span className="heading-count">{filteredTransactions.length}</span></h2><p>Every purchase and sale across your accounts</p></div><button className="button button-small button-light" onClick={()=>{setEditing(null);setModal(true)}}>＋ Add transaction</button></div><TransactionsTable rows={filteredTransactions} accounts={accounts} securities={securities} onEdit={openEdit} onDelete={deleteTransaction}/></section>}
-          {page==="Positions"&&<section className="panel table-panel"><div className="panel-heading"><div><h2>Current positions <span className="heading-count">{filteredPositions.filter(p=>p.units>0).length}</span></h2><p>Update prices directly to refresh unrealized performance</p></div></div><PositionsTable positions={filteredPositions} onPrice={updatePrice}/>{filteredPositions.length===0&&<Empty text="No positions yet. Add a buy transaction to start." action={()=>{setEditing(null);setModal(true)}}/>}</section>}
+          {page==="Transactions"&&<section className="panel table-panel"><div className="panel-heading"><div><h2>All transactions <span className="heading-count">{filteredTransactions.length}</span></h2><p>Every purchase and sale across your accounts</p></div><button className="button button-small button-light" onClick={startTransaction}>＋ Add transaction</button></div><TransactionsTable rows={filteredTransactions} accounts={accounts} securities={securities} onEdit={openEdit} onDelete={deleteTransaction}/></section>}
+          {page==="Positions"&&<section className="panel table-panel"><div className="panel-heading"><div><h2>Current positions <span className="heading-count">{filteredPositions.filter(p=>p.units>0).length}</span></h2><p>Update prices directly to refresh unrealized performance</p></div></div><PositionsTable positions={filteredPositions} onPrice={updatePrice}/>{filteredPositions.length===0&&<Empty text="No positions yet. Add a buy transaction to start." action={startTransaction}/>}</section>}
           {page==="P&L Summary"&&<><section className="panel pnl-panel"><div className="panel-heading"><div><h2>Performance breakdown</h2><p>Weighted average cost method, including transaction fees</p></div><span className={`status-pill ${totals.realized+totals.unrealized>=0?"positive":"negative"}`}>{totals.realized+totals.unrealized>=0?"↗ Gain":"↘ Loss"}</span></div><PositionsTable positions={filteredPositions} onPrice={updatePrice} showRealized/><div className="pnl-total"><span>Net portfolio P&L</span><b className={totals.realized+totals.unrealized>=0?"positive-text":"negative-text"}>{money(totals.realized+totals.unrealized)}</b></div></section><div className="method-note"><span>i</span><p>Realized gains are calculated at the average cost held at each sale. Buy fees are added to cost basis; sale fees reduce realized gains.</p></div></>}
           {page==="Balance Sheet"&&<section className="panel table-panel"><div className="panel-heading"><div><h2>Investment assets</h2><p>Book value and market value grouped by account</p></div><button className="button button-small button-light" onClick={exportCsv}>⇩ Export CSV</button></div><BalanceSheet positions={filteredPositions}/></section>}
         </>}
