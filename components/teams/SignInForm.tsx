@@ -12,8 +12,10 @@ export function SignInForm() {
   const [busy, setBusy] = useState(false);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
-    const origin = window.location.origin;
-    const redirect = new URL("/auth/confirm", origin);
+    // Always return email sign-ins to the canonical app. This matters when a
+    // user requests the link from localhost during local development.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+    const redirect = new URL("/auth/confirm", appUrl);
     const next = params.get("next");
     redirect.searchParams.set("next", next?.startsWith("/") && !next.startsWith("//") ? next : "/");
     const { error: authError } = await createClient().auth.signInWithOtp({
