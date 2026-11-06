@@ -30,7 +30,7 @@ export function SignInForm() {
     const normalizedEmail = email.trim().toLowerCase();
     if (mode === "forgot") {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
-      const redirectTo = new URL("/auth/update-password", appUrl).toString();
+      const redirectTo = new URL("/auth/confirm?next=%2Fauth%2Fupdate-password", appUrl).toString();
       const { error: authError } = await supabase.auth.resetPasswordForEmail(normalizedEmail, { redirectTo });
       if (authError) setError(authError.message);
       else setMessage("If an account exists for that email, we’ve sent password reset instructions.");
@@ -40,7 +40,12 @@ export function SignInForm() {
       else setMessage("Account created. Check your email if confirmation is required, then sign in.");
     } else {
       const { error: authError } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
-      if (authError) setError(authError.message);
+      if (authError) {
+        const message = authError.message.toLowerCase();
+        setError(message.includes("invalid login credentials")
+          ? "That email and password don’t match. If this is your first time signing in with a password, choose “Forgot password?” to set one."
+          : authError.message);
+      }
       else window.location.assign(safeNext());
     }
     setBusy(false);
