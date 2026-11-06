@@ -29,7 +29,9 @@ export default function Home() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.has("error_code") || params.get("error") === "access_denied") {
-      window.location.replace("/auth/sign-in?error=confirmation");
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const signInUrl = new URL("/auth/sign-in?error=confirmation", appUrl);
+      window.location.replace(signInUrl.toString());
     }
   }, []);
 
